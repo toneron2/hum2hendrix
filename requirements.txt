@@ -1,0 +1,45 @@
+# Core Dependencies
+numpy>=1.24.0
+scipy>=1.10.0
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# MIDI Processing
+mido>=1.3.0
+python-rtmidi>=1.5.0
+
+# Music Theory
+music21>=9.1.0
+
+# Audio-to-MIDI Conversion
+basic-pitch>=0.3.0
+
+# Alternative Pitch Detection (Optional)
+# crepe>=0.0.13
+# tensorflow>=2.13.0  # Required for basic-pitch GPU support
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Configuration
+pyyaml>=6.0
+
+# Audio Rendering (Optional - Phase 2)
+# pedalboard>=0.7.0
+
+# CLI Tools
+click>=8.1.0
+tqdm>=4.65.0
+colorama>=0.4.6
+
+# Development Tools
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
+
+# Documentation
+# sphinx>=7.1.0
+# sphinx-rtd-theme>=1.3.0

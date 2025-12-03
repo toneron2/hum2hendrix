@@ -1,0 +1,36 @@
+# Stevie Ray Vaughan Blues Configuration
+# Texas blues style with swing feel
+
+audio_input:
+  sample_rate: 22050
+  normalize: true
+
+conversion:
+  model: basic_pitch
+  confidence_threshold: 0.5
+  min_note_duration: 0.1
+  onset_threshold: 0.5
+
+quantization:
+  pitch:
+    enabled: true
+    scale: blues      # Blues scale with b5
+    root: E
+    octave: 3         # Lower octave for grittier sound
+
+  timing:
+    enabled: true
+    grid: 8           # Eighth note triplets
+    tempo: 120        # Medium shuffle tempo
+    swing: 0.66       # Triplet swing feel
+
+synthesis:
+  mode: midi_export
+  instrument: stratocaster
+  amp_model: dumble  # Dumble-style overdrive
+
+output:
+  directory: ./output/srv_blues
+  format: wav
+  bit_depth: 24
+  sample_rate: 44100

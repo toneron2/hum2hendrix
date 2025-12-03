@@ -1,0 +1,36 @@
+# Little Wing Configuration
+# Hendrix-style configuration for "Little Wing"
+
+audio_input:
+  sample_rate: 22050
+  normalize: true
+
+conversion:
+  model: basic_pitch
+  confidence_threshold: 0.4  # Lower threshold for subtle bends
+  min_note_duration: 0.08    # Shorter notes for faster runs
+  onset_threshold: 0.45
+
+quantization:
+  pitch:
+    enabled: true
+    scale: minor_pentatonic  # E minor pentatonic
+    root: E
+    octave: 4
+
+  timing:
+    enabled: true
+    grid: 16           # Sixteenth notes
+    tempo: 72          # Little Wing tempo
+    swing: 0.0         # Straight feel
+
+synthesis:
+  mode: midi_export
+  instrument: stratocaster
+  amp_model: fender_twin  # Clean Fender amp
+
+output:
+  directory: ./output/little_wing
+  format: wav
+  bit_depth: 24
+  sample_rate: 44100

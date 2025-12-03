@@ -1,0 +1,36 @@
+# Hum-to-Hendrix Default Configuration
+# Copy this file and customize for your needs
+
+audio_input:
+  sample_rate: 22050  # Hz (required by Basic Pitch)
+  normalize: true     # Normalize audio amplitude
+
+conversion:
+  model: basic_pitch  # Options: basic_pitch, crepe, librosa
+  confidence_threshold: 0.5  # 0-1 (lower = more notes detected)
+  min_note_duration: 0.1     # seconds (filter very short notes)
+  onset_threshold: 0.5       # 0-1 (note onset sensitivity)
+
+quantization:
+  pitch:
+    enabled: true
+    scale: minor_pentatonic  # See docs/guides/SCALES.md for options
+    root: E                  # Root note (C, C#, D, Eb, E, F, F#, G, Ab, A, Bb, B)
+    octave: 4                # Base octave for scale
+
+  timing:
+    enabled: true
+    grid: 16       # Beat subdivision (4=quarter, 8=eighth, 16=sixteenth, 32=32nd)
+    tempo: 72      # BPM (Little Wing ~72, typical blues 80-120)
+    swing: 0.0     # 0-0.75 (0=straight, 0.5-0.66=swing, 0.75=heavy swing)
+
+synthesis:
+  mode: midi_export  # Options: midi_export, audio_render (future)
+  instrument: stratocaster
+  amp_model: fender_twin
+
+output:
+  directory: ./output
+  format: wav
+  bit_depth: 24
+  sample_rate: 44100

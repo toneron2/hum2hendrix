@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+ENV/
+
+# Audio files (large binaries)
+*.wav
+*.mp3
+*.flac
+*.aif
+*.aiff
+*.ogg
+!examples/*.wav
+!examples/*.mp3
+
+# MIDI files (keep in git but ignore temp/output)
+output/*.mid
+output/*.midi
+temp/*.mid
+temp/*.midi
+
+# VST Plugins and DAW projects
+*.vst3
+*.dll
+*.component
+*.rpp
+*.rpp-bak
+*.RPP
+*.reapeaks
+*.reapindex
+
+# Model files (Neural Amp Modeler, etc)
+models/*.nam
+models/*.json
+!models/README.md
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.directory
+
+# Local configuration
+config/local_config.yaml
+.env
+
+# Output and temporary files
+output/*
+!output/.gitkeep
+temp/*
+!temp/.gitkeep
+logs/
+*.log
