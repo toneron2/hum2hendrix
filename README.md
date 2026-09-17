@@ -2,6 +2,11 @@
 
 Convert hummed melodies into Hendrix/SRV-style guitar solos with automatic pitch correction, timing quantization, and professional amp simulation.
 
+**Status: The audio-to-MIDI stage is in progress and rendering is not built.**
+[Development Status](#development-status) below carries the phases.
+
+A standalone project on this account, separate from the governance architecture.
+
 ## Project Overview
 
 This system solves a specific engineering problem: converting musical ideas expressed through humming into rendered guitar performances, bypassing the need for instrumental motor skills. The pipeline handles pitch correction, rhythm quantization, and timbral synthesis to produce authentic electric guitar output.
