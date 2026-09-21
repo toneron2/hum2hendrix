@@ -28,7 +28,7 @@
 1. Convert hummed melodies to MIDI
 2. Correct pitch (no natural pitch accuracy)
 3. Correct timing (difficulty keeping time)
-4. Render as authentic Stratocaster with Hendrix/SRV tone
+4. Render as a sampled Stratocaster through an amplifier model
 5. Visualize chord progressions for experimentation
 6. Achieve "refactoring code" workflow for music (pseudocode → syntax → debug → compile)
 
