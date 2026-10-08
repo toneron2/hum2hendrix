@@ -305,7 +305,7 @@ print(f"Visualization: {results['piano_roll']}")
 
 **If timing feels robotic:**
 - Use coarser grid (16 → 8)
-- Add swing (0.0 → 0.5-0.66)
+- Add swing (0.0 → 0.66 for triplet feel)
 
 **If pitch corrections sound wrong:**
 - Try different scale (minor_pentatonic → blues)

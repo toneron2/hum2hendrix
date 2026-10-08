@@ -53,7 +53,6 @@ class HumToHendrixPipeline:
             self.pitch_quantizer = PitchQuantizer(
                 scale_name=self.config.quantization.pitch.scale,
                 root=self.config.quantization.pitch.root,
-                octave=self.config.quantization.pitch.octave,
             )
         else:
             self.pitch_quantizer = None

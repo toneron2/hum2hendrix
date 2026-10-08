@@ -16,7 +16,6 @@ quantization:
     enabled: true
     scale: blues      # Blues scale with b5
     root: E
-    octave: 3         # Lower octave for grittier sound
 
   timing:
     enabled: true

@@ -4,10 +4,24 @@ Configuration Management
 Load and validate pipeline configuration.
 """
 
-import yaml
+import warnings
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Type, TypeVar
+
+import yaml
+
+T = TypeVar('T')
+
+
+def _build(cls: Type[T], values: Optional[Dict[str, Any]], section: str) -> T:
+    """Instantiate a config dataclass, warning about (and ignoring) unknown keys."""
+    values = dict(values or {})
+    known = {f.name for f in fields(cls)}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        warnings.warn(f"Ignoring unknown config keys in '{section}': {', '.join(unknown)}")
+    return cls(**{k: v for k, v in values.items() if k in known})
 
 
 @dataclass
@@ -32,7 +46,6 @@ class PitchQuantizationConfig:
     enabled: bool = True
     scale: str = 'minor_pentatonic'
     root: str = 'E'
-    octave: int = 4
 
 
 @dataclass
@@ -41,7 +54,7 @@ class TimingQuantizationConfig:
     enabled: bool = True
     grid: int = 16  # sixteenth notes
     tempo: int = 72  # BPM
-    swing: float = 0.0  # 0-0.75
+    swing: float = 0.0  # 0 or 0.5 = straight, 0.66 = triplet, 0.75 = heavy
 
 
 @dataclass
@@ -80,19 +93,17 @@ class Config:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'Config':
         """Load configuration from dictionary."""
+        config_dict = config_dict or {}
+        quant = config_dict.get('quantization') or {}
         return cls(
-            audio_input=AudioInputConfig(**config_dict.get('audio_input', {})),
-            conversion=ConversionConfig(**config_dict.get('conversion', {})),
+            audio_input=_build(AudioInputConfig, config_dict.get('audio_input'), 'audio_input'),
+            conversion=_build(ConversionConfig, config_dict.get('conversion'), 'conversion'),
             quantization=QuantizationConfig(
-                pitch=PitchQuantizationConfig(
-                    **config_dict.get('quantization', {}).get('pitch', {})
-                ),
-                timing=TimingQuantizationConfig(
-                    **config_dict.get('quantization', {}).get('timing', {})
-                ),
+                pitch=_build(PitchQuantizationConfig, quant.get('pitch'), 'quantization.pitch'),
+                timing=_build(TimingQuantizationConfig, quant.get('timing'), 'quantization.timing'),
             ),
-            synthesis=SynthesisConfig(**config_dict.get('synthesis', {})),
-            output=OutputConfig(**config_dict.get('output', {})),
+            synthesis=_build(SynthesisConfig, config_dict.get('synthesis'), 'synthesis'),
+            output=_build(OutputConfig, config_dict.get('output'), 'output'),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -113,7 +124,6 @@ class Config:
                     'enabled': self.quantization.pitch.enabled,
                     'scale': self.quantization.pitch.scale,
                     'root': self.quantization.pitch.root,
-                    'octave': self.quantization.pitch.octave,
                 },
                 'timing': {
                     'enabled': self.quantization.timing.enabled,

@@ -16,7 +16,6 @@ quantization:
     enabled: true
     scale: minor_pentatonic  # E minor pentatonic
     root: E
-    octave: 4
 
   timing:
     enabled: true
