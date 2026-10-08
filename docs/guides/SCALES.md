@@ -164,7 +164,6 @@ from quantization import PitchQuantizer
 quantizer = PitchQuantizer(
     scale_name='blues',
     root='E',
-    octave=4
 )
 
 # Quantize MIDI file
@@ -176,7 +175,7 @@ quantizer.quantize_midi_file('raw.mid', 'quantized.mid')
 ```python
 from quantization import PitchQuantizer
 
-# Define custom scale as MIDI note numbers
+# Define custom scale as MIDI note numbers (used as pitch classes in every octave)
 custom_scale = [64, 67, 69, 71, 74]  # E, G, A, B, D (E minor pentatonic)
 
 quantizer = PitchQuantizer(scale_notes=custom_scale)

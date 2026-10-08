@@ -1,28 +1,41 @@
 """
 Pitch Detection Wrappers
 
-Interfaces to various pitch detection models (Basic Pitch, CREPE, etc.)
+Interfaces to various pitch detection models (Basic Pitch, CREPE, librosa pyin).
+
+Two kinds of detector live here:
+
+* Note detectors return discrete note events ``(start, end, midi_note, amplitude)``.
+  Basic Pitch is a note detector: it runs its own onset/offset segmentation.
+* Contour detectors return frame-wise ``(times, frequencies, confidences)`` arrays.
+  CREPE and librosa's pyin are contour detectors; the converter segments their
+  output into notes.
 """
 
+from pathlib import Path
+from typing import List, Tuple, Union
+
 import numpy as np
-from typing import Tuple
+
+NoteEvent = Tuple[float, float, int, float]
 
 
-def detect_pitch_basic_pitch(
-    audio: np.ndarray,
-    sr: int,
+def detect_notes_basic_pitch(
+    audio_path: Union[str, Path],
     onset_threshold: float = 0.5,
     frame_threshold: float = 0.3,
-    min_note_len: int = 58,  # milliseconds
+    min_note_len: float = 58.0,  # milliseconds
     min_freq: float = 80.0,  # Hz (E2)
     max_freq: float = 1200.0,  # Hz (D6)
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> List[NoteEvent]:
     """
-    Detect pitch using Spotify's Basic Pitch model.
+    Detect notes using Spotify's Basic Pitch model.
+
+    Basic Pitch loads and resamples the audio itself, so it takes a file path
+    rather than samples.
 
     Args:
-        audio: Audio samples (mono)
-        sr: Sample rate
+        audio_path: Path to an audio file
         onset_threshold: Threshold for note onset detection
         frame_threshold: Threshold for frame-level pitch activation
         min_note_len: Minimum note length in milliseconds
@@ -30,7 +43,8 @@ def detect_pitch_basic_pitch(
         max_freq: Maximum frequency to detect (Hz)
 
     Returns:
-        (times, frequencies, confidences) arrays
+        List of (start_time, end_time, midi_note, amplitude) tuples, sorted by
+        start time. Amplitude is Basic Pitch's note activation in [0, 1].
     """
     try:
         from basic_pitch.inference import predict
@@ -40,43 +54,24 @@ def detect_pitch_basic_pitch(
             "basic-pitch not installed. Install with: pip install basic-pitch"
         )
 
-    # Run Basic Pitch inference
-    model_output, midi_data, note_events = predict(
-        audio,
-        sr,
+    # predict(audio_path, model_or_model_path, ...) -> (model_output, midi, note_events)
+    _, _, note_events = predict(
+        str(audio_path),
+        ICASSP_2022_MODEL_PATH,
         onset_threshold=onset_threshold,
         frame_threshold=frame_threshold,
         minimum_note_length=min_note_len,
         minimum_frequency=min_freq,
         maximum_frequency=max_freq,
-        model_or_model_path=ICASSP_2022_MODEL_PATH,
     )
 
-    # Extract note events
-    # note_events format: List of (start_time, end_time, pitch_midi, amplitude)
-    if len(note_events) == 0:
-        return np.array([]), np.array([]), np.array([])
-
-    times = []
-    frequencies = []
-    confidences = []
-
-    for start_time, end_time, pitch_midi, amplitude, _ in note_events:
-        # Convert MIDI pitch to frequency
-        frequency = 440.0 * (2.0 ** ((pitch_midi - 69) / 12.0))
-
-        # Use center time
-        time = (start_time + end_time) / 2.0
-
-        times.append(time)
-        frequencies.append(frequency)
-        confidences.append(amplitude)
-
-    return (
-        np.array(times),
-        np.array(frequencies),
-        np.array(confidences),
-    )
+    # note_events: (start_time_s, end_time_s, pitch_midi, amplitude, pitch_bends)
+    notes = [
+        (float(event[0]), float(event[1]), int(event[2]), float(event[3]))
+        for event in note_events
+    ]
+    notes.sort(key=lambda n: n[0])
+    return notes
 
 
 def detect_pitch_crepe(
@@ -106,28 +101,17 @@ def detect_pitch_crepe(
             "crepe not installed. Install with: pip install crepe"
         )
 
-    # Run CREPE inference
-    time, frequency, confidence, activation = crepe.predict(
+    time, frequency, confidence, _ = crepe.predict(
         audio,
         sr,
         model_capacity=model_capacity,
-        viterbi=True,  # Use Viterbi smoothing for better pitch tracking
+        viterbi=True,  # Viterbi smoothing for better pitch tracking
         step_size=step_size,
     )
 
-    # Filter by confidence
-    mask = confidence >= confidence_threshold
-    time = time[mask]
-    frequency = frequency[mask]
-    confidence = confidence[mask]
-
-    # Filter out unvoiced regions (very low frequencies)
-    voiced_mask = frequency > 50.0
-    time = time[voiced_mask]
-    frequency = frequency[voiced_mask]
-    confidence = confidence[voiced_mask]
-
-    return time, frequency, confidence
+    # Keep confident, voiced frames only
+    mask = (confidence >= confidence_threshold) & (frequency > 50.0)
+    return time[mask], frequency[mask], confidence[mask]
 
 
 def detect_pitch_librosa(
@@ -152,7 +136,6 @@ def detect_pitch_librosa(
     """
     import librosa
 
-    # Use librosa's pyin (probabilistic YIN)
     f0, voiced_flag, voiced_probs = librosa.pyin(
         audio,
         fmin=fmin,
@@ -161,17 +144,12 @@ def detect_pitch_librosa(
         hop_length=hop_length,
     )
 
-    # Create time array
     times = librosa.frames_to_time(
         np.arange(len(f0)),
         sr=sr,
         hop_length=hop_length,
     )
 
-    # Filter NaN values and unvoiced regions
+    # Drop unvoiced frames (NaN f0)
     valid_mask = ~np.isnan(f0) & voiced_flag
-    times = times[valid_mask]
-    frequencies = f0[valid_mask]
-    confidences = voiced_probs[valid_mask]
-
-    return times, frequencies, confidences
+    return times[valid_mask], f0[valid_mask], voiced_probs[valid_mask]
