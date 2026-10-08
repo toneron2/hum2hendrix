@@ -423,9 +423,8 @@ Core libraries:
 - `basic-pitch`: Audio-to-MIDI conversion
 - `librosa`: Audio analysis
 - `mido`: MIDI file I/O
-- `music21`: Music theory operations
+- `soundfile`: Writing audio for Basic Pitch
 - `numpy`: Numerical computing
-- `scipy`: Signal processing
 - `matplotlib`: Visualization
 - `pyyaml`: Configuration parsing
 
