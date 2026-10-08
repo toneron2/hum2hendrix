@@ -30,8 +30,8 @@ ENV/
 *.aif
 *.aiff
 *.ogg
-!examples/*.wav
-!examples/*.mp3
+!examples/**/*.wav
+!examples/**/*.mp3
 
 # MIDI files (keep in git but ignore temp/output)
 output/*.mid

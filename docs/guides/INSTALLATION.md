@@ -57,7 +57,7 @@ python -c "import audio_to_midi; print('✓ Installation successful')"
 #### Core Dependencies (Required)
 
 ```bash
-pip install numpy scipy librosa soundfile mido python-rtmidi music21 basic-pitch matplotlib pyyaml click tqdm
+pip install numpy librosa soundfile mido basic-pitch matplotlib pyyaml click
 ```
 
 #### GPU Acceleration (Optional)

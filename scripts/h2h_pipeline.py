@@ -44,7 +44,7 @@ def main(audio_file, config, output_dir, scale, root, tempo, grid, no_visualize)
     if config:
         pipeline_config = load_config(Path(config))
     else:
-        from pipeline.config import Config, QuantizationConfig, PitchQuantizationConfig, TimingQuantizationConfig
+        from pipeline.config import Config
 
         # Override defaults with CLI args
         pipeline_config = Config()

@@ -6,14 +6,10 @@ Main controller for the hum-to-hendrix processing pipeline.
 
 from pathlib import Path
 from typing import Optional
-import sys
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from audio_to_midi import AudioToMIDIConverter
 from quantization import PitchQuantizer, TimingQuantizer
-from visualization import plot_piano_roll, plot_midi_comparison
+
 from .config import Config, load_config
 
 
@@ -100,7 +96,7 @@ class HumToHendrixPipeline:
         }
 
         print(f"\n{'='*60}")
-        print(f"Hum-to-Hendrix Pipeline")
+        print("Hum-to-Hendrix Pipeline")
         print(f"{'='*60}\n")
         print(f"Input: {audio_path}")
         print(f"Output Directory: {output_dir}\n")
@@ -158,6 +154,9 @@ class HumToHendrixPipeline:
         if visualize:
             print("[4/5] Generating visualizations...")
             try:
+                # matplotlib is slow to import; only pay for it when plotting
+                from visualization import plot_midi_comparison, plot_piano_roll
+
                 piano_roll_path = output_dir / f"{stem}_pianoroll.png"
                 plot_piano_roll(results['final_midi'], piano_roll_path)
                 results['piano_roll'] = piano_roll_path

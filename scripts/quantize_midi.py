@@ -46,7 +46,7 @@ def main(midi_file, output, scale, root, grid, pitch_only, timing_only):
             temp_path = midi_path.parent / f"{midi_path.stem}_temp.mid"
             pitch_quantizer.quantize_midi_file(current_file, temp_path)
             current_file = temp_path
-            print(f"  ✓ Pitch quantized")
+            print("  ✓ Pitch quantized")
         else:
             pitch_quantizer.quantize_midi_file(current_file, output_path)
             print(f"  ✓ Pitch quantized: {output_path}")
