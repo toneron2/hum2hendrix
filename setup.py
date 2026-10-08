@@ -11,11 +11,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="hum2hendrix",
     version="0.1.0",
-    author="Home Lab Projects",
+    author="Tony Slosar",
     description="Convert hummed melodies into guitar solos with automatic pitch/timing correction",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/hum2hendrix",
+    url="https://github.com/toneron2/hum2hendrix",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     classifiers=[
