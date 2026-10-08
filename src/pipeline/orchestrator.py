@@ -46,6 +46,7 @@ class HumToHendrixPipeline:
             confidence_threshold=self.config.conversion.confidence_threshold,
             min_note_duration=self.config.conversion.min_note_duration,
             onset_threshold=self.config.conversion.onset_threshold,
+            normalize=self.config.audio_input.normalize,
         )
 
         if self.config.quantization.pitch.enabled:

@@ -4,20 +4,29 @@ Audio-to-MIDI Converter
 Main conversion logic from audio waveform to MIDI file.
 """
 
-import librosa
-import numpy as np
+import tempfile
 from pathlib import Path
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
+
 import mido
-from mido import MidiFile, MidiTrack, Message
+import numpy as np
+from mido import Message, MidiFile, MidiTrack
+
+from .pitch_detection import NoteEvent
+
+# (start_time, duration, midi_note, velocity)
+Note = Tuple[float, float, int, int]
+
+NOTE_MODELS = ('basic_pitch',)
+CONTOUR_MODELS = ('crepe', 'librosa')
 
 
 class AudioToMIDIConverter:
     """
     Converts audio files (hummed melodies) into MIDI files.
 
-    Uses deep learning pitch detection (Basic Pitch or CREPE) to extract
-    fundamental frequency contours and convert them to MIDI note events.
+    Supports Basic Pitch (note detector) and CREPE or librosa pyin (contour
+    detectors). Contour output is segmented into notes by `segment_notes`.
     """
 
     def __init__(
@@ -27,22 +36,31 @@ class AudioToMIDIConverter:
         confidence_threshold: float = 0.5,
         min_note_duration: float = 0.1,
         onset_threshold: float = 0.5,
+        normalize: bool = True,
     ):
         """
         Initialize converter.
 
         Args:
-            model: Pitch detection model ('basic_pitch' or 'crepe')
+            model: Pitch detection model ('basic_pitch', 'crepe' or 'librosa')
             sample_rate: Target sample rate for audio
-            confidence_threshold: Minimum confidence for note detection (0-1)
+            confidence_threshold: Minimum confidence for note detection (0-1).
+                For Basic Pitch this filters on the note amplitude.
             min_note_duration: Minimum note length in seconds
-            onset_threshold: Threshold for note onset detection (0-1)
+            onset_threshold: Threshold for note onset detection (0-1, Basic Pitch)
+            normalize: Peak-normalize audio to [-1, 1] before detection
         """
+        if model not in NOTE_MODELS + CONTOUR_MODELS:
+            raise ValueError(
+                f"Unknown model: {model!r}. "
+                f"Choose from {', '.join(NOTE_MODELS + CONTOUR_MODELS)}"
+            )
         self.model = model
         self.sample_rate = sample_rate
         self.confidence_threshold = confidence_threshold
         self.min_note_duration = min_note_duration
         self.onset_threshold = onset_threshold
+        self.normalize = normalize
 
     def load_audio(self, audio_path: Path) -> Tuple[np.ndarray, int]:
         """
@@ -54,49 +72,65 @@ class AudioToMIDIConverter:
         Returns:
             (audio_samples, sample_rate) tuple
         """
-        # Load audio with librosa
+        import librosa  # heavy import; only needed when loading audio
+
         audio, sr = librosa.load(
-            audio_path,
+            str(audio_path),
             sr=self.sample_rate,
             mono=True,
         )
 
-        # Normalize audio to [-1, 1]
-        if np.abs(audio).max() > 0:
-            audio = audio / np.abs(audio).max()
+        if self.normalize:
+            peak = np.abs(audio).max()
+            if peak > 0:
+                audio = audio / peak
 
         return audio, sr
 
+    def detect_notes(self, audio: np.ndarray, sr: int) -> List[NoteEvent]:
+        """
+        Run a note detector (Basic Pitch) on audio samples.
+
+        Basic Pitch reads from a file, so the (possibly normalized and
+        resampled) samples are written to a temporary WAV first.
+
+        Returns:
+            List of (start_time, end_time, midi_note, amplitude) tuples
+        """
+        import soundfile as sf
+
+        from .pitch_detection import detect_notes_basic_pitch
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_wav = Path(tmp_dir) / 'input.wav'
+            sf.write(tmp_wav, audio, sr)
+            return detect_notes_basic_pitch(
+                tmp_wav,
+                onset_threshold=self.onset_threshold,
+                min_note_len=self.min_note_duration * 1000.0,  # ms
+            )
+
     def detect_pitch(self, audio: np.ndarray, sr: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Detect pitch from audio using specified model.
-
-        Args:
-            audio: Audio samples
-            sr: Sample rate
+        Run a contour detector (CREPE or librosa pyin) on audio samples.
 
         Returns:
             (times, frequencies, confidences) arrays
         """
-        if self.model == 'basic_pitch':
-            from .pitch_detection import detect_pitch_basic_pitch
-            return detect_pitch_basic_pitch(
-                audio,
-                sr,
-                onset_threshold=self.onset_threshold,
-                min_note_len=int(self.min_note_duration * 1000),  # ms
-            )
-        elif self.model == 'crepe':
+        if self.model == 'crepe':
             from .pitch_detection import detect_pitch_crepe
             return detect_pitch_crepe(
                 audio,
                 sr,
                 confidence_threshold=self.confidence_threshold,
             )
-        else:
-            raise ValueError(f"Unknown model: {self.model}")
+        if self.model == 'librosa':
+            from .pitch_detection import detect_pitch_librosa
+            return detect_pitch_librosa(audio, sr)
+        raise ValueError(f"{self.model!r} is not a contour model")
 
-    def frequency_to_midi(self, frequency: float) -> int:
+    @staticmethod
+    def frequency_to_midi(frequency: float) -> int:
         """
         Convert frequency in Hz to MIDI note number.
 
@@ -108,14 +142,27 @@ class AudioToMIDIConverter:
         """
         if frequency <= 0:
             return 0
+        return int(AudioToMIDIConverter.frequencies_to_midi(np.array([frequency]))[0])
 
+    @staticmethod
+    def frequencies_to_midi(frequencies: np.ndarray) -> np.ndarray:
+        """
+        Vectorised Hz -> MIDI note number conversion.
+
+        Non-positive frequencies map to 0.
+        """
+        frequencies = np.asarray(frequencies, dtype=float)
+        midi = np.zeros(frequencies.shape, dtype=int)
+        positive = frequencies > 0
         # MIDI note number = 69 + 12*log2(f/440)
-        midi_note = 69 + 12 * np.log2(frequency / 440.0)
-        return int(np.round(np.clip(midi_note, 0, 127)))
+        midi[positive] = np.round(
+            np.clip(69 + 12 * np.log2(frequencies[positive] / 440.0), 0, 127)
+        ).astype(int)
+        return midi
 
     def notes_to_midi(
         self,
-        notes: List[Tuple[float, float, int, float]],
+        notes: List[Note],
         tempo: int = 120,
     ) -> MidiFile:
         """
@@ -128,41 +175,30 @@ class AudioToMIDIConverter:
         Returns:
             MidiFile object
         """
-        # Create MIDI file
         mid = MidiFile(type=1)
         track = MidiTrack()
         mid.tracks.append(track)
 
-        # Add tempo
         track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo)))
 
-        # Convert to MIDI events
-        # We need to convert time to ticks
-        ticks_per_beat = mid.ticks_per_beat
-        ticks_per_second = ticks_per_beat * tempo / 60.0
+        ticks_per_second = mid.ticks_per_beat * tempo / 60.0
 
-        # Create note on/off events
+        # (tick, order, type, note, velocity); note_off sorts before note_on at
+        # the same tick so back-to-back notes of one pitch don't overlap.
         events = []
         for start_time, duration, midi_note, velocity in notes:
-            start_tick = int(start_time * ticks_per_second)
-            end_tick = int((start_time + duration) * ticks_per_second)
+            start_tick = int(round(start_time * ticks_per_second))
+            end_tick = int(round((start_time + duration) * ticks_per_second))
+            end_tick = max(end_tick, start_tick + 1)
 
-            events.append((start_tick, 'note_on', midi_note, velocity))
-            events.append((end_tick, 'note_off', midi_note, 0))
+            events.append((start_tick, 1, 'note_on', midi_note, int(velocity)))
+            events.append((end_tick, 0, 'note_off', midi_note, 0))
 
-        # Sort by time
-        events.sort(key=lambda x: x[0])
+        events.sort(key=lambda e: (e[0], e[1]))
 
-        # Convert to delta times and add to track
         last_tick = 0
-        for tick, msg_type, note, velocity in events:
-            delta = tick - last_tick
-
-            if msg_type == 'note_on':
-                track.append(Message('note_on', note=note, velocity=int(velocity), time=delta))
-            else:
-                track.append(Message('note_off', note=note, velocity=0, time=delta))
-
+        for tick, _, msg_type, note, velocity in events:
+            track.append(Message(msg_type, note=note, velocity=velocity, time=tick - last_tick))
             last_tick = tick
 
         return mid
@@ -174,7 +210,7 @@ class AudioToMIDIConverter:
         tempo: int = 120,
     ) -> MidiFile:
         """
-        Full conversion pipeline: audio → MIDI file.
+        Full conversion pipeline: audio -> MIDI file.
 
         Args:
             audio_path: Input audio file path
@@ -184,45 +220,65 @@ class AudioToMIDIConverter:
         Returns:
             MidiFile object
         """
-        # Load audio
         audio, sr = self.load_audio(audio_path)
 
-        # Detect pitch
-        times, frequencies, confidences = self.detect_pitch(audio, sr)
+        if self.model in NOTE_MODELS:
+            events = self.detect_notes(audio, sr)
+            notes = self.note_events_to_notes(events)
+        else:
+            times, frequencies, confidences = self.detect_pitch(audio, sr)
 
-        # Filter by confidence
-        mask = confidences >= self.confidence_threshold
-        times = times[mask]
-        frequencies = frequencies[mask]
-        confidences = confidences[mask]
+            mask = confidences >= self.confidence_threshold
+            times, frequencies, confidences = times[mask], frequencies[mask], confidences[mask]
 
-        # Convert to MIDI notes
-        midi_notes = np.array([self.frequency_to_midi(f) for f in frequencies])
+            midi_notes = self.frequencies_to_midi(frequencies)
+            notes = self.segment_notes(times, midi_notes, confidences)
 
-        # Segment into discrete notes
-        notes = self._segment_notes(times, midi_notes, confidences)
-
-        # Create MIDI file
         mid = self.notes_to_midi(notes, tempo=tempo)
-
-        # Save
-        mid.save(output_path)
-
+        mid.save(str(output_path))
         return mid
 
-    def _segment_notes(
+    def note_events_to_notes(self, events: List[NoteEvent]) -> List[Note]:
+        """
+        Convert detector note events into the converter's note tuples.
+
+        Applies the confidence (amplitude) and minimum-duration filters.
+
+        Args:
+            events: (start_time, end_time, midi_note, amplitude) tuples
+
+        Returns:
+            List of (start_time, duration, midi_note, velocity) tuples
+        """
+        notes = []
+        for start, end, midi_note, amplitude in events:
+            duration = end - start
+            if amplitude < self.confidence_threshold or duration < self.min_note_duration:
+                continue
+            notes.append((float(start), float(duration), int(midi_note), _velocity(amplitude)))
+        notes.sort(key=lambda n: n[0])
+        return notes
+
+    def segment_notes(
         self,
         times: np.ndarray,
         midi_notes: np.ndarray,
         confidences: np.ndarray,
-    ) -> List[Tuple[float, float, int, float]]:
+        max_gap: Optional[float] = None,
+    ) -> List[Note]:
         """
-        Segment continuous pitch contour into discrete notes.
+        Segment a frame-wise pitch contour into discrete notes.
+
+        A note ends when the MIDI pitch changes or when the gap between
+        consecutive voiced frames exceeds `max_gap` (a rest). Velocity is the
+        mean confidence over the note's own frames.
 
         Args:
-            times: Time array (seconds)
-            midi_notes: MIDI note numbers
-            confidences: Confidence scores
+            times: Frame times (seconds), ascending
+            midi_notes: MIDI note number per frame
+            confidences: Confidence per frame
+            max_gap: Largest silence (seconds) still bridged inside one note.
+                Defaults to 2.5 frame periods.
 
         Returns:
             List of (start_time, duration, midi_note, velocity) tuples
@@ -230,31 +286,42 @@ class AudioToMIDIConverter:
         if len(times) == 0:
             return []
 
-        notes = []
-        current_note = None
-        current_start = None
+        times = np.asarray(times, dtype=float)
+        if len(times) > 1:
+            frame_period = float(np.median(np.diff(times)))
+        else:
+            frame_period = self.min_note_duration
+        if max_gap is None:
+            max_gap = 2.5 * frame_period
 
-        for i, (time, note, conf) in enumerate(zip(times, midi_notes, confidences)):
-            if current_note is None:
-                # Start new note
-                current_note = note
-                current_start = time
-            elif note != current_note:
-                # Note changed, save previous
-                duration = time - current_start
-                if duration >= self.min_note_duration:
-                    velocity = int(np.clip(conf * 127, 1, 127))
-                    notes.append((current_start, duration, int(current_note), velocity))
+        notes: List[Note] = []
+        start_idx = 0
 
-                # Start new note
-                current_note = note
-                current_start = time
-
-        # Add final note
-        if current_note is not None:
-            duration = times[-1] - current_start
+        def flush(end_idx: int, end_time: float) -> None:
+            """Emit frames [start_idx, end_idx) as one note ending at end_time."""
+            start = times[start_idx]
+            duration = end_time - start
             if duration >= self.min_note_duration:
-                velocity = int(np.clip(confidences[-1] * 127, 1, 127))
-                notes.append((current_start, duration, int(current_note), velocity))
+                conf = float(np.mean(confidences[start_idx:end_idx]))
+                notes.append((float(start), float(duration), int(midi_notes[start_idx]), _velocity(conf)))
 
+        for i in range(1, len(times)):
+            gap = times[i] - times[i - 1]
+            if gap > max_gap:
+                # Rest: close the note one frame after its last voiced frame
+                flush(i, times[i - 1] + frame_period)
+                start_idx = i
+            elif midi_notes[i] != midi_notes[start_idx]:
+                flush(i, times[i])
+                start_idx = i
+
+        flush(len(times), times[-1] + frame_period)
         return notes
+
+    # Backwards-compatible alias
+    _segment_notes = segment_notes
+
+
+def _velocity(confidence: float) -> int:
+    """Map a 0-1 confidence/amplitude to a MIDI velocity in 1-127."""
+    return int(np.clip(round(confidence * 127), 1, 127))
