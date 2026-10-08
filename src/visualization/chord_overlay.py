@@ -4,14 +4,29 @@ Chord Progression Overlay
 Display chord progressions alongside melodies on piano roll.
 """
 
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
-from .piano_roll import extract_notes_from_midi
+from typing import List, Optional, Sequence, Tuple
 
+import matplotlib.pyplot as plt
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
 
-# Common chord definitions (semitones from root)
+from quantization.scales import ROOT_NOTES
+
+from .piano_roll import (
+    DEFAULT_DPI,
+    add_velocity_colorbar,
+    draw_notes,
+    extract_notes_from_midi,
+    finish_figure,
+    note_bounds,
+    style_piano_axes,
+)
+
+# (chord_symbol, start_time, duration) in seconds
+Chord = Tuple[str, float, float]
+
+# Chord qualities as semitones from root
 CHORD_TEMPLATES = {
     'major': [0, 4, 7],
     'minor': [0, 3, 7],
@@ -21,23 +36,34 @@ CHORD_TEMPLATES = {
     'min7b5': [0, 3, 6, 10],  # Half-diminished
     'dim': [0, 3, 6],
     'dim7': [0, 3, 6, 9],
+    'aug': [0, 4, 8],
     'sus4': [0, 5, 7],
     'sus2': [0, 2, 7],
     '6': [0, 4, 7, 9],
     'min6': [0, 3, 7, 9],
     '9': [0, 4, 7, 10, 14],
     'maj9': [0, 4, 7, 11, 14],
+    'min9': [0, 3, 7, 10, 14],
 }
 
-# MIDI note name mapping
-ROOT_NOTES = {
-    'C': 0, 'C#': 1, 'Db': 1,
-    'D': 2, 'D#': 3, 'Eb': 3,
-    'E': 4,
-    'F': 5, 'F#': 6, 'Gb': 6,
-    'G': 7, 'G#': 8, 'Ab': 8,
-    'A': 9, 'A#': 10, 'Bb': 10,
-    'B': 11,
+# Chord-symbol suffix -> template name. Case matters: 'M' is major, 'm' is minor.
+QUALITY_ALIASES = {
+    '': 'major', 'M': 'major', 'maj': 'major', 'Maj': 'major',
+    'm': 'minor', 'min': 'minor', '-': 'minor',
+    'maj7': 'maj7', 'Maj7': 'maj7', 'M7': 'maj7',
+    'm7': 'min7', 'min7': 'min7', '-7': 'min7',
+    '7': '7', 'dom7': '7',
+    'm7b5': 'min7b5', 'min7b5': 'min7b5', 'ø': 'min7b5', 'ø7': 'min7b5',
+    'dim': 'dim', 'o': 'dim', '°': 'dim',
+    'dim7': 'dim7', 'o7': 'dim7', '°7': 'dim7',
+    'aug': 'aug', '+': 'aug',
+    'sus4': 'sus4', 'sus': 'sus4',
+    'sus2': 'sus2',
+    '6': '6', 'M6': '6', 'maj6': '6',
+    'm6': 'min6', 'min6': 'min6',
+    '9': '9', 'dom9': '9',
+    'maj9': 'maj9', 'Maj9': 'maj9', 'M9': 'maj9',
+    'm9': 'min9', 'min9': 'min9',
 }
 
 
@@ -46,62 +72,76 @@ def parse_chord(chord_symbol: str, octave: int = 4) -> Tuple[str, List[int]]:
     Parse chord symbol into MIDI notes.
 
     Args:
-        chord_symbol: Chord symbol (e.g., 'Em7', 'Gmaj7', 'Am')
-        octave: Base octave for chord
+        chord_symbol: Chord symbol (e.g., 'Em7', 'Gmaj7', 'Am', 'Bbm7b5')
+        octave: Octave of the root, with C4 = MIDI 60
 
     Returns:
-        (chord_name, list of MIDI notes)
+        (chord_symbol, list of MIDI notes)
+
+    Raises:
+        ValueError: on an unknown root or chord quality
 
     Examples:
         >>> parse_chord('Em7', 4)
         ('Em7', [64, 67, 71, 74])  # E, G, B, D
     """
-    # Extract root note
-    if len(chord_symbol) > 1 and chord_symbol[1] in ('#', 'b'):
-        root_str = chord_symbol[:2]
-        quality_str = chord_symbol[2:]
+    symbol = chord_symbol.strip()
+    if not symbol:
+        raise ValueError("Empty chord symbol")
+
+    if len(symbol) > 1 and symbol[1] in ('#', 'b'):
+        root_str, quality_str = symbol[:2], symbol[2:]
     else:
-        root_str = chord_symbol[0]
-        quality_str = chord_symbol[1:]
+        root_str, quality_str = symbol[:1], symbol[1:]
 
     if root_str not in ROOT_NOTES:
-        raise ValueError(f"Unknown root note: {root_str}")
+        raise ValueError(f"Unknown root note in chord {chord_symbol!r}: {root_str!r}")
+    if quality_str not in QUALITY_ALIASES:
+        raise ValueError(
+            f"Unknown chord quality in {chord_symbol!r}: {quality_str!r}. "
+            f"Known: {', '.join(sorted(k for k in QUALITY_ALIASES if k))}"
+        )
 
-    root_pitch_class = ROOT_NOTES[root_str]
+    intervals = CHORD_TEMPLATES[QUALITY_ALIASES[quality_str]]
+    root_midi = (octave + 1) * 12 + ROOT_NOTES[root_str]
+    return chord_symbol, [root_midi + interval for interval in intervals]
 
-    # Determine chord quality
-    quality_str = quality_str.lower()
 
-    # Map common abbreviations
-    if quality_str == 'm':
-        quality = 'minor'
-    elif quality_str in ('', 'M'):
-        quality = 'major'
-    elif quality_str in ('m7', 'min7'):
-        quality = 'min7'
-    elif quality_str in ('maj7', 'M7'):
-        quality = 'maj7'
-    elif quality_str == '7':
-        quality = '7'
-    else:
-        quality = quality_str
+def chord_pitch_classes(chord_symbol: str) -> List[int]:
+    """Pitch classes (0-11) of a chord symbol, root first."""
+    _, notes = parse_chord(chord_symbol)
+    return [n % 12 for n in notes]
 
-    if quality not in CHORD_TEMPLATES:
-        # Default to major if unknown
-        quality = 'major'
 
-    # Build MIDI notes
-    intervals = CHORD_TEMPLATES[quality]
-    root_midi = octave * 12 + root_pitch_class
-    midi_notes = [root_midi + interval for interval in intervals]
+def draw_chords(ax: plt.Axes, chords: Sequence[Chord], fontsize: int = 12) -> None:
+    """Draw a chord timeline as labelled coloured blocks on `ax`."""
+    cmap = plt.cm.Set3
+    rects = [Rectangle((start, 0), duration, 1) for _, start, duration in chords]
+    colors = [cmap(i % cmap.N) for i in range(len(chords))]
+    ax.add_collection(PatchCollection(
+        rects, facecolors=colors, edgecolors='black', linewidths=2, alpha=0.7,
+    ))
 
-    return chord_symbol, midi_notes
+    for symbol, start, duration in chords:
+        ax.text(
+            start + duration / 2, 0.5, symbol,
+            ha='center', va='center', fontsize=fontsize, fontweight='bold',
+        )
+
+    ax.set_ylim(0, 1)
+    ax.set_yticks([])
+    ax.grid(True, axis='x', alpha=0.3)
+
+
+def chords_end_time(chords: Sequence[Chord]) -> float:
+    return max((start + duration for _, start, duration in chords), default=0.0)
 
 
 def plot_chord_progression(
-    chords: List[Tuple[str, float, float]],
+    chords: List[Chord],
     output_path: Optional[Path] = None,
     figsize: Tuple[int, int] = (14, 6),
+    dpi: int = DEFAULT_DPI,
 ) -> None:
     """
     Plot chord progression as a timeline.
@@ -110,166 +150,85 @@ def plot_chord_progression(
         chords: List of (chord_symbol, start_time, duration) tuples
         output_path: Optional path to save figure
         figsize: Figure size
+        dpi: Output resolution when saving
     """
     fig, ax = plt.subplots(figsize=figsize)
-
-    # Plot each chord as a colored block
-    colors = plt.cm.Set3(range(len(chords)))
-
-    for i, (chord_symbol, start_time, duration) in enumerate(chords):
-        rect = patches.Rectangle(
-            (start_time, 0),
-            duration,
-            1,
-            linewidth=2,
-            edgecolor='black',
-            facecolor=colors[i % len(colors)],
-            alpha=0.7,
-        )
-        ax.add_patch(rect)
-
-        # Add chord label
-        ax.text(
-            start_time + duration / 2,
-            0.5,
-            chord_symbol,
-            ha='center',
-            va='center',
-            fontsize=14,
-            fontweight='bold',
-        )
-
-    # Set axis properties
-    ax.set_xlim(0, max(start + dur for _, start, dur in chords) * 1.05)
-    ax.set_ylim(0, 1)
+    draw_chords(ax, chords, fontsize=14)
+    ax.set_xlim(0, chords_end_time(chords) * 1.05)
     ax.set_xlabel('Time (seconds)', fontsize=12)
     ax.set_title('Chord Progression', fontsize=14, fontweight='bold')
-    ax.set_yticks([])
-    ax.grid(True, axis='x', alpha=0.3)
+    finish_figure(fig, output_path, dpi, 'chord progression')
 
-    plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        print(f"Saved chord progression to {output_path}")
-    else:
-        plt.show()
-
-    plt.close()
+def draw_chord_tones(
+    ax: plt.Axes,
+    chords: Sequence[Chord],
+    min_pitch: int,
+    max_pitch: int,
+) -> None:
+    """Shade the chord tones of each chord across the visible pitch range."""
+    rects = []
+    for symbol, start, duration in chords:
+        tones = set(chord_pitch_classes(symbol))
+        for pitch in range(min_pitch, max_pitch + 1):
+            if pitch % 12 in tones:
+                rects.append(Rectangle((start, pitch - 0.5), duration, 1.0))
+    if rects:
+        ax.add_collection(PatchCollection(rects, facecolors='gold', linewidths=0, alpha=0.18))
 
 
 def overlay_chords_on_pianoroll(
     midi_path: Path,
-    chords: List[Tuple[str, float, float]],
+    chords: List[Chord],
     output_path: Optional[Path] = None,
     figsize: Tuple[int, int] = (14, 10),
+    dpi: int = DEFAULT_DPI,
 ) -> None:
     """
     Plot piano roll with chord progression overlay.
+
+    Chord tones are shaded on the piano roll so you can see which melody
+    notes sit inside the harmony.
 
     Args:
         midi_path: Path to MIDI file (melody)
         chords: List of (chord_symbol, start_time, duration) tuples
         output_path: Optional path to save figure
         figsize: Figure size
+        dpi: Output resolution when saving
     """
+    # Validate every chord before drawing anything
+    for symbol, _, _ in chords:
+        parse_chord(symbol)
+
+    notes = extract_notes_from_midi(midi_path)
+
     fig, (ax_chords, ax_piano) = plt.subplots(
         2, 1,
         figsize=figsize,
         gridspec_kw={'height_ratios': [1, 4]},
+        sharex=True,
     )
 
-    # Plot chord progression on top
-    colors = plt.cm.Set3(range(len(chords)))
-    for i, (chord_symbol, start_time, duration) in enumerate(chords):
-        rect = patches.Rectangle(
-            (start_time, 0),
-            duration,
-            1,
-            linewidth=2,
-            edgecolor='black',
-            facecolor=colors[i % len(colors)],
-            alpha=0.7,
-        )
-        ax_chords.add_patch(rect)
-
-        # Add chord label
-        ax_chords.text(
-            start_time + duration / 2,
-            0.5,
-            chord_symbol,
-            ha='center',
-            va='center',
-            fontsize=12,
-            fontweight='bold',
-        )
-
-    ax_chords.set_xlim(0, max(start + dur for _, start, dur in chords) * 1.05)
-    ax_chords.set_ylim(0, 1)
+    draw_chords(ax_chords, chords)
     ax_chords.set_title('Chord Progression', fontsize=12, fontweight='bold')
-    ax_chords.set_yticks([])
-    ax_chords.grid(True, axis='x', alpha=0.3)
 
-    # Plot melody notes on bottom
-    notes = extract_notes_from_midi(midi_path)
-
-    for start_time, duration, pitch, velocity in notes:
-        color = plt.cm.viridis(velocity / 127.0)
-        rect = patches.Rectangle(
-            (start_time, pitch - 0.4),
-            duration,
-            0.8,
-            linewidth=1,
-            edgecolor='black',
-            facecolor=color,
-            alpha=0.8,
-        )
-        ax_piano.add_patch(rect)
-
-    # Highlight chord tones
-    for chord_symbol, start_time, duration in chords:
-        try:
-            _, chord_notes = parse_chord(chord_symbol, octave=4)
-            # Highlight chord tones across all octaves
-            for octave in range(0, 10):
-                for interval in CHORD_TEMPLATES.get('major', [0, 4, 7]):
-                    pitch = octave * 12 + (chord_notes[0] % 12) + interval
-                    if 0 <= pitch <= 127:
-                        rect = patches.Rectangle(
-                            (start_time, pitch - 0.5),
-                            duration,
-                            1.0,
-                            linewidth=0,
-                            facecolor='yellow',
-                            alpha=0.1,
-                        )
-                        ax_piano.add_patch(rect)
-        except:
-            pass
-
-    ax_piano.set_xlabel('Time (seconds)', fontsize=12)
-    ax_piano.set_ylabel('MIDI Pitch', fontsize=12)
-    ax_piano.set_title('Melody (Piano Roll)', fontsize=12, fontweight='bold')
-
+    end_time = chords_end_time(chords)
     if notes:
-        max_time = max(start + dur for start, dur, _, _ in notes)
-        min_pitch = min(pitch for _, _, pitch, _ in notes)
-        max_pitch = max(pitch for _, _, pitch, _ in notes)
-
-        ax_piano.set_xlim(0, max_time * 1.05)
-        ax_piano.set_ylim(min_pitch - 2, max_pitch + 2)
-
-    ax_piano.grid(True, alpha=0.3, linestyle='--')
-
-    plt.tight_layout()
-
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        print(f"Saved overlay to {output_path}")
+        notes_end, min_pitch, max_pitch = note_bounds(notes)
+        end_time = max(end_time, notes_end)
     else:
-        plt.show()
+        min_pitch, max_pitch = 52, 76  # E3 to E5 by default
 
-    plt.close()
+    min_pitch, max_pitch = min_pitch - 2, max_pitch + 2
+    draw_chord_tones(ax_piano, chords, min_pitch, max_pitch)
+    draw_notes(ax_piano, notes)
+    style_piano_axes(ax_piano, end_time, min_pitch + 2, max_pitch - 2)
+    ax_piano.set_title('Melody (Piano Roll)', fontsize=12, fontweight='bold')
+    if notes:
+        add_velocity_colorbar(fig, ax_piano)
+
+    finish_figure(fig, output_path, dpi, 'overlay')
 
 
 # Example: Little Wing chord progression
@@ -290,8 +249,7 @@ LITTLE_WING_CHORDS = [
 
 
 if __name__ == '__main__':
-    # Demo
     print("Testing chord parsing:")
-    for chord_sym in ['Em', 'Gmaj7', 'Am7', 'Bm', 'C', 'D7']:
+    for chord_sym in ['Em', 'Gmaj7', 'Am7', 'Bm', 'C', 'D7', 'Bbm7b5']:
         name, notes = parse_chord(chord_sym)
         print(f"{name}: {notes}")
