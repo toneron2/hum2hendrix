@@ -16,4 +16,4 @@ __all__ = [
     'overlay_chords_on_pianoroll',
 ]
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
