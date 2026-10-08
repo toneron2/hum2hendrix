@@ -16,13 +16,12 @@ quantization:
     enabled: true
     scale: minor_pentatonic  # See docs/guides/SCALES.md for options
     root: E                  # Root note (C, C#, D, Eb, E, F, F#, G, Ab, A, Bb, B)
-    octave: 4                # Base octave for scale
 
   timing:
     enabled: true
     grid: 16       # Beat subdivision (4=quarter, 8=eighth, 16=sixteenth, 32=32nd)
     tempo: 72      # BPM (Little Wing ~72, typical blues 80-120)
-    swing: 0.0     # 0-0.75 (0=straight, 0.5-0.66=swing, 0.75=heavy swing)
+    swing: 0.0     # 0 or 0.5 = straight, 0.66 = triplet swing, 0.75 = heavy swing
 
 synthesis:
   mode: midi_export  # Options: midi_export, audio_render (future)

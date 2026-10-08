@@ -4,8 +4,8 @@ Pipeline Orchestration Module
 Coordinates the full hum-to-hendrix processing pipeline.
 """
 
+from .config import Config, load_config
 from .orchestrator import HumToHendrixPipeline
-from .config import load_config, Config
 
 __all__ = [
     'HumToHendrixPipeline',
