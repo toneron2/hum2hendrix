@@ -2,7 +2,8 @@
 
 ## System Requirements
 
-- Python 3.9 or higher
+- Python 3.9 to 3.11 (Basic Pitch pins TensorFlow < 2.16, which has no
+  wheels for Python 3.12+; see Troubleshooting for a workaround)
 - 4GB+ RAM
 - 4GB free disk space
 - Microphone or audio input device
@@ -167,12 +168,21 @@ pip install --force-reinstall pyaudio
 
 ### Issue: Basic Pitch installation fails
 
-**Solution**: Install TensorFlow first:
+On Linux with Python 3.11 and newer, `basic-pitch` requires
+`tensorflow<2.15.1`. On Python 3.12 and newer no such TensorFlow wheel
+exists and pip reports `ResolutionImpossible`.
+
+**Solution A** (recommended): use Python 3.10 or 3.11 for this project.
+
+**Solution B**: install Basic Pitch without its TensorFlow dependency and
+let it run on ONNX Runtime instead:
 
 ```bash
-pip install tensorflow>=2.13.0
-pip install basic-pitch
+pip install --no-deps basic-pitch
+pip install onnxruntime pretty_midi mir_eval resampy
 ```
+
+The `librosa` model (`--model librosa`) needs neither and works everywhere.
 
 ### Issue: MIDI playback not working
 
@@ -202,6 +212,10 @@ Run the test suite:
 ```bash
 pytest tests/
 ```
+
+After `pip install -e .` the four tools are also on your PATH as
+`hum2midi`, `quantize-midi`, `visualize-midi` and `h2h-pipeline`; the
+`scripts/*.py` files run the same commands from a plain checkout.
 
 Test individual components:
 

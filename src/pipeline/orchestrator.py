@@ -5,7 +5,7 @@ Main controller for the hum-to-hendrix processing pipeline.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 from audio_to_midi import AudioToMIDIConverter
 from quantization import PitchQuantizer, TimingQuantizer
@@ -35,7 +35,6 @@ class HumToHendrixPipeline:
         """
         self.config = config or Config()
 
-        # Initialize converters
         self.audio_to_midi = AudioToMIDIConverter(
             model=self.config.conversion.model,
             sample_rate=self.config.audio_input.sample_rate,
@@ -45,21 +44,19 @@ class HumToHendrixPipeline:
             normalize=self.config.audio_input.normalize,
         )
 
+        self.pitch_quantizer: Optional[PitchQuantizer] = None
         if self.config.quantization.pitch.enabled:
             self.pitch_quantizer = PitchQuantizer(
                 scale_name=self.config.quantization.pitch.scale,
                 root=self.config.quantization.pitch.root,
             )
-        else:
-            self.pitch_quantizer = None
 
+        self.timing_quantizer: Optional[TimingQuantizer] = None
         if self.config.quantization.timing.enabled:
             self.timing_quantizer = TimingQuantizer(
                 grid_resolution=self.config.quantization.timing.grid,
                 swing=self.config.quantization.timing.swing,
             )
-        else:
-            self.timing_quantizer = None
 
     def process(
         self,
@@ -70,85 +67,82 @@ class HumToHendrixPipeline:
         """
         Run complete pipeline on audio file.
 
+        Audio-to-MIDI failure raises, since nothing downstream can run
+        without it. Later stages fall back to the previous stage's output and
+        record the problem in ``results['errors']`` so callers can report a
+        non-zero exit status.
+
         Args:
             audio_path: Input audio file (hummed melody)
             output_dir: Output directory (uses config default if None)
             visualize: Whether to generate visualization plots
 
         Returns:
-            Dictionary with paths to generated files
+            Dictionary with paths to generated files and an 'errors' list
         """
-        # Setup output directory
+        audio_path = Path(audio_path)
         if output_dir is None:
             output_dir = Path(self.config.output.directory)
-
+        output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate output filenames
         stem = audio_path.stem
         raw_midi_path = output_dir / f"{stem}_raw.mid"
         pitch_quantized_path = output_dir / f"{stem}_pitch_quantized.mid"
         final_midi_path = output_dir / f"{stem}_final.mid"
 
-        results = {
+        errors: List[str] = []
+        results: Dict[str, object] = {
             'input_audio': audio_path,
             'output_dir': output_dir,
+            'errors': errors,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("Hum-to-Hendrix Pipeline")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
         print(f"Input: {audio_path}")
         print(f"Output Directory: {output_dir}\n")
 
-        # Stage 1: Audio to MIDI
+        # Stage 1: Audio to MIDI (fatal on failure)
         print("[1/5] Converting audio to MIDI...")
-        try:
-            self.audio_to_midi.convert(
-                audio_path,
-                raw_midi_path,
-                tempo=self.config.quantization.timing.tempo,
-            )
-            results['raw_midi'] = raw_midi_path
-            print(f"      ✓ Raw MIDI saved: {raw_midi_path}")
-        except Exception as e:
-            print(f"      ✗ Error: {e}")
-            return results
+        self.audio_to_midi.convert(
+            audio_path,
+            raw_midi_path,
+            tempo=self.config.quantization.timing.tempo,
+        )
+        results['raw_midi'] = raw_midi_path
+        print(f"      ✓ Raw MIDI saved: {raw_midi_path}")
+        current_midi = raw_midi_path
 
         # Stage 2: Pitch Quantization
-        if self.config.quantization.pitch.enabled and self.pitch_quantizer:
+        if self.pitch_quantizer:
             print(f"[2/5] Quantizing pitch to {self.config.quantization.pitch.scale} scale...")
             try:
-                self.pitch_quantizer.quantize_midi_file(
-                    raw_midi_path,
-                    pitch_quantized_path,
-                )
+                self.pitch_quantizer.quantize_midi_file(current_midi, pitch_quantized_path)
                 results['pitch_quantized_midi'] = pitch_quantized_path
-                print(f"      ✓ Pitch quantized: {pitch_quantized_path}")
                 current_midi = pitch_quantized_path
-            except Exception as e:
+                print(f"      ✓ Pitch quantized: {pitch_quantized_path}")
+            except Exception as e:  # keep going with the unquantized file
+                errors.append(f"pitch quantization: {e}")
                 print(f"      ✗ Error: {e}")
-                current_midi = raw_midi_path
         else:
             print("[2/5] Pitch quantization disabled")
-            current_midi = raw_midi_path
 
         # Stage 3: Timing Quantization
-        if self.config.quantization.timing.enabled and self.timing_quantizer:
+        if self.timing_quantizer:
             print(f"[3/5] Quantizing timing to {self.config.quantization.timing.grid}th note grid...")
             try:
-                self.timing_quantizer.quantize_midi_file(
-                    current_midi,
-                    final_midi_path,
-                )
-                results['final_midi'] = final_midi_path
+                self.timing_quantizer.quantize_midi_file(current_midi, final_midi_path)
+                current_midi = final_midi_path
                 print(f"      ✓ Timing quantized: {final_midi_path}")
             except Exception as e:
+                errors.append(f"timing quantization: {e}")
                 print(f"      ✗ Error: {e}")
-                results['final_midi'] = current_midi
         else:
             print("[3/5] Timing quantization disabled")
-            results['final_midi'] = current_midi
+
+        results['final_midi'] = current_midi
 
         # Stage 4: Visualization
         if visualize:
@@ -158,20 +152,17 @@ class HumToHendrixPipeline:
                 from visualization import plot_midi_comparison, plot_piano_roll
 
                 piano_roll_path = output_dir / f"{stem}_pianoroll.png"
-                plot_piano_roll(results['final_midi'], piano_roll_path)
+                plot_piano_roll(current_midi, piano_roll_path)
                 results['piano_roll'] = piano_roll_path
                 print(f"      ✓ Piano roll: {piano_roll_path}")
 
-                if 'pitch_quantized_midi' in results or 'final_midi' in results:
+                if current_midi != raw_midi_path:
                     comparison_path = output_dir / f"{stem}_comparison.png"
-                    plot_midi_comparison(
-                        raw_midi_path,
-                        results['final_midi'],
-                        comparison_path,
-                    )
+                    plot_midi_comparison(raw_midi_path, current_midi, comparison_path)
                     results['comparison'] = comparison_path
                     print(f"      ✓ Comparison: {comparison_path}")
             except Exception as e:
+                errors.append(f"visualization: {e}")
                 print(f"      ✗ Visualization error: {e}")
         else:
             print("[4/5] Visualization disabled")
@@ -179,9 +170,9 @@ class HumToHendrixPipeline:
         # Stage 5: Audio Rendering (future)
         print("[5/5] Audio rendering (not yet implemented)")
 
-        print(f"\n{'='*60}")
-        print("Pipeline complete!")
-        print(f"{'='*60}\n")
+        print(f"\n{'=' * 60}")
+        print("Pipeline complete!" if not errors else f"Pipeline finished with {len(errors)} error(s)")
+        print(f"{'=' * 60}\n")
 
         return results
 
@@ -201,7 +192,6 @@ class HumToHendrixPipeline:
 
 
 if __name__ == '__main__':
-    # Demo
     import sys
 
     if len(sys.argv) < 2:
@@ -211,7 +201,6 @@ if __name__ == '__main__':
     audio_path = Path(sys.argv[1])
     config_path = Path(sys.argv[2]) if len(sys.argv) > 2 else None
 
-    # Create and run pipeline
     if config_path:
         pipeline = HumToHendrixPipeline.from_config_file(config_path)
     else:
@@ -223,3 +212,4 @@ if __name__ == '__main__':
     for key, path in results.items():
         if isinstance(path, Path):
             print(f"  {key}: {path}")
+    sys.exit(1 if results['errors'] else 0)

@@ -23,14 +23,18 @@ This will:
 python scripts/h2h_pipeline.py [OPTIONS] AUDIO_FILE
 ```
 
-**Options:**
+**Options** (command-line options override the config file):
 - `--config, -c`: Configuration file (YAML)
 - `--output-dir, -o`: Output directory
+- `--model, -m`: Pitch detection model: basic_pitch, crepe, librosa (default: basic_pitch)
 - `--scale, -s`: Scale name (default: minor_pentatonic)
 - `--root, -r`: Root note (default: E)
 - `--tempo, -t`: Tempo in BPM (default: 72)
-- `--grid, -g`: Timing grid (default: 16)
+- `--grid, -g`: Timing grid: 4, 8, 16, 32 (default: 16)
+- `--swing`: 0 or 0.5 straight, 0.66 triplet, 0.75 heavy (default: 0)
 - `--no-visualize`: Skip visualization
+
+The command exits with status 1 if any stage fails.
 
 **Examples:**
 
@@ -97,6 +101,9 @@ python scripts/quantize_midi.py raw.mid --pitch-only --scale blues
 
 # Timing only (no pitch correction)
 python scripts/quantize_midi.py raw.mid --timing-only --grid 8
+
+# Eighth-note grid with triplet swing
+python scripts/quantize_midi.py raw.mid --grid 8 --swing 0.66
 ```
 
 ### 4. Visualization Only
@@ -113,7 +120,7 @@ python scripts/visualize_midi.py [OPTIONS] MIDI_FILE
 # Basic piano roll
 python scripts/visualize_midi.py solo.mid
 
-# Compare before/after quantization
+# Compare before/after quantization (--compare takes the original file)
 python scripts/visualize_midi.py quantized.mid --compare raw.mid
 
 # Overlay chord progression (Little Wing example)
