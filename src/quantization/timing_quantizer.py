@@ -94,6 +94,16 @@ class TimingQuantizer:
         candidates = (down, off, next_down)
         return min(candidates, key=lambda pos: (abs(pos - tick), pos))
 
+    def next_grid_after(self, tick: int, ticks_per_beat: int) -> int:
+        """The first grid position strictly after `tick` (swing aware)."""
+        pair_len = 2 * self._ticks_per_grid(ticks_per_beat)
+        pair_index = int(max(0, tick) // pair_len)
+        while True:
+            for pos in self._pair_positions(pair_index, ticks_per_beat):
+                if pos > tick:
+                    return pos
+            pair_index += 1
+
     def quantize_duration_ticks(self, duration: int, ticks_per_beat: int) -> int:
         """Round a duration to a whole number of grid units (at least one)."""
         ticks_per_grid = self._ticks_per_grid(ticks_per_beat)
@@ -149,8 +159,10 @@ class TimingQuantizer:
                             offset = onset + self.quantize_duration_ticks(tick - onset, ticks_per_beat)
                         else:
                             offset = self.quantize_to_grid(tick, ticks_per_beat)
-                        # Note off must come after note on
-                        offset = max(offset, onset + 1)
+                            # A note shorter than half a grid step snaps both ends to
+                            # one position; it ends on the next one instead.
+                            if offset <= onset:
+                                offset = self.next_grid_after(onset, ticks_per_beat)
                         quantized_events.append((offset, 0, order, msg))
                     else:
                         # Note off without matching note on: keep as is

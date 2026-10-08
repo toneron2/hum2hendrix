@@ -77,13 +77,16 @@ def test_quantize_midi_file_moves_onsets_and_offsets(tmp_path):
                                (480, 'note_on', 62), (720, 'note_off', 62)]
 
 
-def test_note_off_never_precedes_its_note_on(tmp_path):
+def test_short_note_lasts_one_grid_step(tmp_path):
     src = tmp_path / 'in.mid'
-    # a 20-tick note starting just before a grid line
+    # a 20-tick note starting just before a grid line: both ends snap to 240
     _midi_with([(230, 'note_on', 60, 100), (250, 'note_off', 60, 0)]).save(str(src))
     out = tmp_path / 'out.mid'
     TimingQuantizer(grid_resolution=8).quantize_midi_file(src, out)
-    assert _abs_notes(out) == [(240, 'note_on', 60), (241, 'note_off', 60)]
+    assert _abs_notes(out) == [(240, 'note_on', 60), (480, 'note_off', 60)]
+    # with triplet swing the next position after a downbeat is the swung offbeat
+    TimingQuantizer(grid_resolution=8, swing=0.66).quantize_midi_file(src, out)
+    assert _abs_notes(out) == [(317, 'note_on', 60), (480, 'note_off', 60)]
 
 
 def test_quantize_duration_option(tmp_path):
